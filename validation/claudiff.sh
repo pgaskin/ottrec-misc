@@ -37,11 +37,15 @@ jq -cr --arg now "$updated" '
     .rawActivity |= gsub(" *[*].*";"") |
     .time = .startTime + " - " + .endTime |
     .current = (.startDate == null or .startDate <= $now) and ($now <= .endDate or .endDate == null) |
-    select(.current) |
+    .single = (.weekday | test("-")) |
+    select(.current and (.single | not)) |
     [.facilityName, .rawActivity, .time, .weekday, .reservationRequired] |
     join(" | ")
 ' |
 iconv -f utf-8 -t ascii//translit -c |
 sort > $prefix.ours.txt
+
+# - we need to filter out schedules which don't currently apply since claudie's doesn't include them
+# - same for single-date days on special schedules
 
 git diff --no-index $prefix.ours.txt $prefix.theirs.txt > $prefix.diff

@@ -14,7 +14,7 @@ commit="$(set -eu; curl -sL "https://api.github.com/repos/$repo/commits?per_page
 updated="$(set -eu; jq -ncr --argjson x "$commit" '$x[0].commit.committer.date | gsub("T.+";"")')"
 sha="$(set -eu; jq -ncr --argjson x "$commit" '$x[0].sha')"
 
-prefix=clau.$updated
+prefix=simulacru.$updated
 echo "$repo $file $sha $updated"
 set -x
 
@@ -22,6 +22,9 @@ curl --fail -sL "https://github.com/$repo/raw/$sha/$file" |
 jq -cr '
     .[] |
     .dayOfWeek = ["", "monday", "tuesday","wednesday","thursday","friday","saturday","sunday"][.dayOfWeek] |
+    .isDateProbablyAssumedFromNothing = (.periodStartDate | endswith("-01-01")) and (.periodEndDate | endswith("-12-31")) |
+    .periodStartDate = if .isDateProbablyAssumedFromNothing then "" else .periodStartDate end |
+    .periodEndDate = if .isDateProbablyAssumedFromNothing then "" else .periodEndDate end |
     [.facility, .activity, .startTime, .endTime, .dayOfWeek, .periodStartDate, .periodEndDate] |
     join(" | ")
 ' |
