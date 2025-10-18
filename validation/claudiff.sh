@@ -2,13 +2,20 @@
 #
 # This script compares data we've scraped to the data on claudielarouche.com.
 #
-set -euxo pipefail
+set -euo pipefail
 cd "$(dirname "$0")"
 
-updated=$(set -x; curl -sL https://claudielarouche.com/projects/ottawa-drop-ins/ | grep -Pom1 '(?<=Data last updated: )[0-9-]+')
-prefix=clau.$updated
+repo=claudielarouche/claudielarouche
+file=assets/data/ottawa-drop-ins.csv
+commit="$(set -eu; curl -sL "https://api.github.com/repos/$repo/commits?per_page=1&path=$file")"
+updated="$(set -eu; jq -ncr --argjson x "$commit" '$x[0].commit.committer.date | gsub("T.+";"")')"
+sha="$(set -eu; jq -ncr --argjson x "$commit" '$x[0].sha')"
 
-curl --fail -sL https://claudielarouche.com/assets/data/ottawa-drop-ins.csv |
+prefix=clau.$updated
+echo "$repo $file $sha $updated"
+set -x
+
+curl --fail -sL "https://github.com/$repo/raw/$sha/$file" |
 python -c 'import csv, json, sys; print(json.dumps([dict(r) for r in csv.DictReader(sys.stdin)]))' |
 jq -cr '
     .[] |
@@ -37,4 +44,4 @@ sort > $prefix.ours.txt
 
 # TODO: do we need to filter ours for only currently active schedules?
 
-git diff --no-index $prefix.ours.txt $prefix.theirs.txt > $prefix.$updated.diff
+git diff --no-index $prefix.ours.txt $prefix.theirs.txt > $prefix.diff
