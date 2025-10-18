@@ -5,7 +5,8 @@
 set -euxo pipefail
 cd "$(dirname "$0")"
 
-updated=$(set -e; curl -sL https://claudielarouche.com/projects/ottawa-drop-ins/ | grep -Pom1 '(?<=Data last updated: )[0-9-]+')
+updated=$(set -x; curl -sL https://claudielarouche.com/projects/ottawa-drop-ins/ | grep -Pom1 '(?<=Data last updated: )[0-9-]+')
+prefix=clau.$updated
 
 curl --fail -sL https://claudielarouche.com/assets/data/ottawa-drop-ins.csv |
 python -c 'import csv, json, sys; print(json.dumps([dict(r) for r in csv.DictReader(sys.stdin)]))' |
@@ -19,7 +20,7 @@ jq -cr '
     join(" | ")
 ' |
 iconv -f utf-8 -t ascii//translit -c |
-sort > theirs.txt
+sort > $prefix.theirs.txt
 
 curl --fail -sL "https://data.ottrec.ca/export/$updated.json" |
 jq -cr '
@@ -32,8 +33,8 @@ jq -cr '
     join(" | ")
 ' |
 iconv -f utf-8 -t ascii//translit -c |
-sort > ours.txt
+sort > $prefix.ours.txt
 
 # TODO: do we need to filter ours for only currently active schedules?
 
-git diff --no-index ours.txt theirs.txt > diff.txt
+git diff --no-index $prefix.ours.txt $prefix.theirs.txt > $prefix.$updated.diff

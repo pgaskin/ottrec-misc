@@ -5,7 +5,8 @@
 set -euxo pipefail
 cd "$(dirname "$0")"
 
-updated=$(set -e; curl -sL https://api.github.com/repos/simulacrumus/ottawa-drop-in-activity-scraper/commits/main | grep -Pom1 '(?<=Update schedules and caches \()[0-9-]+')
+updated=$(set -x; curl -sL https://api.github.com/repos/simulacrumus/ottawa-drop-in-activity-scraper/commits | jq -cr '.[].commit.message' | grep -Pom1 '(?<=Update schedules and caches \()[0-9-]+')
+prefix=simulacru.$updated
 
 curl --fail -sL "https://github.com/simulacrumus/ottawa-drop-in-activity-scraper/raw/main/schedules.json" |
 jq -cr '
@@ -15,7 +16,7 @@ jq -cr '
     join(" | ")
 ' |
 iconv -f utf-8 -t ascii//translit -c |
-sort > theirs.txt
+sort > $prefix.theirs.txt
 
 curl --fail -sL "https://data.ottrec.ca/export/$updated.json" |
 jq -cr '
@@ -27,6 +28,6 @@ jq -cr '
     join(" | ")
 ' |
 iconv -f utf-8 -t ascii//translit -c |
-sort > ours.txt
+sort > $prefix.ours.txt
 
-git diff --no-index ours.txt theirs.txt > diff.txt
+git diff --no-index $prefix.ours.txt $prefix.theirs.txt > simulacru.$updated.diff
