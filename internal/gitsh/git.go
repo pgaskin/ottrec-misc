@@ -49,16 +49,27 @@ func Exec(ctx context.Context, repo string, output func(iter.Seq[string]), arg .
 			return err
 		}
 		defer r.Close()
-		defer w.Close()
 
 		cmd.Stdout = w
 		cmd.Stderr = w
 
+		var (
+			done   = make(chan struct{})
+			outErr error
+		)
 		go func() {
-			var err error
-			output(readLinesSeq(r)(&err))
-			_ = err
+			defer close(done)
+			output(readLinesSeq(r)(&outErr))
+			io.Copy(io.Discard, r) // don't block the command if output stopped early
 		}()
+
+		err = cmd.Run()
+		w.Close() // so the reader sees EOF
+		<-done    // and has drained everything before r is closed
+		if err != nil {
+			return err
+		}
+		return outErr
 	}
 	return cmd.Run()
 }
@@ -103,6 +114,76 @@ func CatFile(ctx context.Context, repo, treeish, path string) ([]byte, error) {
 		return nil, TransformError(err, stderr.Bytes())
 	}
 	return stdout.Bytes(), nil
+}
+
+// CatFileBatch is like [CatFile], but reads multiple files with a single
+// process, returning nil for nonexistent files.
+func CatFileBatch(ctx context.Context, repo, treeish string, paths []string) ([][]byte, error) {
+	var stdin bytes.Buffer
+	for _, path := range paths {
+		stdin.WriteString(treeish)
+		stdin.WriteString(":")
+		stdin.WriteString(path)
+		stdin.WriteString("\n")
+	}
+
+	cmd := exec.CommandContext(ctx, Git, "cat-file", "--batch")
+	cmd.Dir = repo
+	cmd.Stdin = &stdin
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	// `<oid> <type> <size>\n<contents>\n` or `<input> missing\n`
+	bufs := make([][]byte, 0, len(paths))
+	r := bufio.NewReader(stdout)
+	for range paths {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			break
+		}
+		line = strings.TrimSuffix(line, "\n")
+
+		_, rest, ok := strings.Cut(line, " ") // oid
+		if !ok {
+			bufs = append(bufs, nil)
+			continue
+		}
+		_, sizeStr, ok := strings.Cut(rest, " ") // type
+		if !ok {
+			bufs = append(bufs, nil) // "<input> missing"
+			continue
+		}
+		size, err := strconv.ParseInt(sizeStr, 10, 64)
+		if err != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return nil, fmt.Errorf("parse cat-file header %q: %w", line, err)
+		}
+		buf := make([]byte, size+1) // includes the trailing newline
+		if _, err := io.ReadFull(r, buf); err != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return nil, fmt.Errorf("read cat-file contents: %w", err)
+		}
+		bufs = append(bufs, buf[:size])
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return nil, TransformError(err, stderr.Bytes())
+	}
+	if len(bufs) != len(paths) {
+		return nil, fmt.Errorf("read %d of %d objects", len(bufs), len(paths))
+	}
+	return bufs, nil
 }
 
 // CommitsAscFirstParent iterates over commits hashes and dates in the specified
