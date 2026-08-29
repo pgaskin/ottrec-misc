@@ -1,6 +1,6 @@
 module github.com/ottrec/misc
 
-go 1.26.2
+go 1.27.0
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20260328224638-b7b298a31867
